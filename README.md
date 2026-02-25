@@ -31,7 +31,7 @@ Ensure your host system has the following installed:
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/your-username/AnySlicer-Next-CachyBox.git
+    git clone https://github.com/Slashdacoda/AnySlicer-Next-CachyBox.git
     cd AnySlicer-Next-CachyBox
     ```
 
