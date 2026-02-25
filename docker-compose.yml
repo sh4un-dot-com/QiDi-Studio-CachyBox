@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  anycubic-slicer:
+    # Set the image name.
+    # Defaults to 'anycubic-custom-amd' if the variable is not set.
+    image: ${ANYCUBIC_IMAGE:-anycubic-custom-amd}
+    container_name: anycubic-slicer-compose
+
+    # Use host networking for seamless X11/Wayland communication
+    network_mode: host
+
+    # Privileged mode is required for direct hardware/GPU access
+    privileged: true
+
+    environment:
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
+      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
+      # Fix for some QT-based GUI issues
+      - QT_X11_NO_MITSHM=1
+      - NO_AT_BRIDGE=1
+      # Locale settings to prevent decimal/formatting crashes
+      - LANG=en_US.UTF-8
+      - LC_ALL=en_US.UTF-8
+
+    volumes:
+      # X11 Socket for GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+
+      # Wayland Socket (optional, used by modern desktops like KDE/GNOME)
+      - ${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY:-wayland-0}:${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY:-wayland-0}:ro
+
+      # Maps your host home directory to the container user's home
+      # This ensures your printer profiles and files are persistent
+      - ${HOME}:/home/sliceruser:rw
+
+      # Direct GPU access for AMD and Intel (Mesa/DRI)
+      - /dev/dri:/dev/dri:rw
+
+    # The command to start the slicer inside the container
+    command: AnycubicSlicerNext
