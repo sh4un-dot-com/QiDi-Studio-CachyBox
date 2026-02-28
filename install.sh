@@ -17,6 +17,12 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/install.log"
 LAST_STEP_FILE="$LOG_DIR/last_failed_step"
 
+log(){
+    local level="$1"; shift
+    local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo -e "[$ts] [$level] $*" | tee -a "$LOG_FILE"
+}
+
 # default download URL (can be overridden with --url)
 QIDI_URL="https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage"
 
