@@ -3,7 +3,7 @@
 set blue (set_color blue); set green (set_color green); set red (set_color red); set yellow (set_color yellow); set normal (set_color normal)
 
 echo -e "$blue--------------------------------------------------------"
-echo -e "🚀 QIDI Studio Installer for CachyOS"
+echo -e "QIDI Studio Installer for CachyOS"
 echo -e "--------------------------------------------------------$normal"
 
 # --- CLI options & logging ---
@@ -80,13 +80,17 @@ else
     if test -z "$img_choice"; set img_choice "1"; end
 end
 
+# Inform user what's next and where logs will go
+log INFO "Starting installation loop. Output will stream to console and $LOG_FILE"
+echo "\nStarting installation — streaming output to console and log: $LOG_FILE\n"
+
 # --- Step 3: Installation Loop with DNS Retry ---
 set use_custom_dns false; set install_success false
 while test "$install_success" = false
     if distrobox list | grep -q "qidi-studio"; distrobox rm -f qidi-studio; end
     set current_add_flags "$add_flags"
     if test "$use_custom_dns" = true
-        echo -e "$yellow🔧 DNS issues detected. Retrying with explicit DNS...$normal"
+        echo -e "$yellowDNS issues detected. Retrying with explicit DNS...$normal"
         set current_add_flags "$current_add_flags --dns 1.1.1.1 --dns 8.8.8.8"
     end
 
@@ -95,12 +99,12 @@ while test "$install_success" = false
     else
         distrobox create --name qidi-studio --image ubuntu:24.04 $gpu_flags --additional-flags "$current_add_flags" --yes 2>&1 | tee -a $LOG_FILE
     end
-    echo -e "\n$yellow⏳ Installing basic packages. This might take a few minutes...$normal"
+    echo -e "\n$yellowInstalling basic packages. This might take a few minutes...$normal"
 
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: would enter container and run apt update/install and download QIDI AppImage"
     else
-        distrobox enter qidi-studio -- bash -lc "set -euo pipefail; echo '🟢 Running: apt update'; sudo apt update; echo '🟢 Running: apt install'; sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri; sudo locale-gen en_US.UTF-8; echo '🟢 Downloading QIDI Studio AppImage'; curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar $qidi_url -o /usr/local/bin/QIDIStudio; chmod +x /usr/local/bin/QIDIStudio" 2>&1 | tee -a $LOG_FILE
+        distrobox enter qidi-studio -- bash -lc "set -euo pipefail; echo 'Running: apt update'; sudo apt update; echo 'Running: apt install'; sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri; sudo locale-gen en_US.UTF-8; echo 'Downloading QIDI Studio AppImage'; curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar $qidi_url -o /usr/local/bin/QIDIStudio; chmod +x /usr/local/bin/QIDIStudio" 2>&1 | tee -a $LOG_FILE
     end
     if test "$DRY_RUN" = "true"
         set install_success true
@@ -131,7 +135,7 @@ if test -n "$d_file"
     set exec_cmd (grep "Exec=" $d_file | cut -d'=' -f2-)
     sed -i "s|Exec=.*|Exec=sh -c \"$exec_cmd; distrobox stop qidi-studio --yes\"|" $d_file
     update-desktop-database ~/.local/share/applications
-    echo -e "$green✅ Done! Container stops automatically on exit.$normal"
+    echo -e "$greenDone! Container stops automatically on exit.$normal"
 else
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: desktop file would be created at ~/.local/share/applications/*qidi*.desktop"

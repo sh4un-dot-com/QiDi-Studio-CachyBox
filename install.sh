@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}--------------------------------------------------------${NC}"
-echo -e "🚀 QIDI Studio Installer (Universal Bash)"
+echo -e "QIDI Studio Installer (Universal Bash)"
 echo -e "${BLUE}--------------------------------------------------------${NC}"
 
 # --- CLI options & Logging ---
@@ -182,6 +182,11 @@ else
     img_choice=${img_choice:-1}
 fi
 
+# Inform user what's next and where logs will go
+LAST_STEP="start"
+log "INFO" "Starting installation loop. Output will stream to console and $LOG_FILE"
+echo -e "\nStarting installation — streaming output to console and log: $LOG_FILE\n"
+
 # --- Step 4: Installation Loop with DNS Retry ---
 SUCCESS=false
 USE_DNS=false
@@ -194,7 +199,7 @@ while [ "$SUCCESS" = false ]; do
 
     CURRENT_ADD_FLAGS="$ADD_FLAGS"
     if [ "$USE_DNS" = true ]; then
-        echo -e "${YELLOW}🔧 DNS/Network issues detected. Re-creating container with explicit DNS (1.1.1.1)...${NC}"
+        echo -e "${YELLOW}DNS/Network issues detected. Re-creating container with explicit DNS (1.1.1.1)...${NC}"
         CURRENT_ADD_FLAGS="$CURRENT_ADD_FLAGS --dns 1.1.1.1 --dns 8.8.8.8"
     fi
 
@@ -220,7 +225,7 @@ while [ "$SUCCESS" = false ]; do
     IMAGE_NAME="ubuntu:24.04"
     if [ "$img_choice" == "2" ]; then
         if [ -f "$CONTAINERFILE" ]; then
-            log "INFO" "🏗️ Building local image from $CONTAINERFILE"
+            log "INFO" "Building local image from $CONTAINERFILE"
             if [ "$DRY_RUN" = true ]; then
                 log "INFO" "DRY RUN: would run podman build -t qidi-custom-$GPU_TYPE -f $CONTAINERFILE ."
             else
@@ -232,7 +237,7 @@ while [ "$SUCCESS" = false ]; do
         fi
     fi
 
-    echo -e "${BLUE}📦 Creating Distrobox container...${NC}"
+    echo -e "${BLUE}Creating Distrobox container...${NC}"
     LAST_STEP="container:create"
     if [ "$DRY_RUN" = true ]; then
         log "INFO" "DRY RUN: would run: distrobox create --name qidi-studio --image $IMAGE_NAME $GPU_FLAG --additional-flags '$CURRENT_ADD_FLAGS' --yes"
@@ -240,24 +245,24 @@ while [ "$SUCCESS" = false ]; do
         distrobox create --name qidi-studio --image $IMAGE_NAME $GPU_FLAG --additional-flags "$CURRENT_ADD_FLAGS" --yes 2>&1 | tee -a "$LOG_FILE"
     fi
 
-    echo -e "\n${YELLOW}⏳ Installing basic packages. This might take a few minutes...${NC}"
+    echo -e "\n${YELLOW}Installing basic packages. This might take a few minutes...${NC}"
 
     # Package list fixed for Ubuntu 24.04 (Noble)
     LAST_STEP="install:packages"
     log "INFO" "Installing packages and downloading application inside container"
     install_cmds=$(cat <<'EOC'
-set -euo pipefail
-echo '🟢 Running: apt update'
-sudo apt update
-echo '🟢 Running: apt install (this will stream progress)'
-sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri
-echo '🟢 Generating locales'
-sudo locale-gen en_US.UTF-8
-echo '🟢 Downloading QIDI Studio AppImage (with retries)'
-echo '🟢 Downloading with curl (retries)'
-curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$QIDI_URL" -o /usr/local/bin/QIDIStudio
-chmod +x /usr/local/bin/QIDIStudio
-EOC
+    set -euo pipefail
+    echo 'Running: apt update'
+    sudo apt update
+    echo 'Running: apt install (this will stream progress)'
+    sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri
+    echo 'Generating locales'
+    sudo locale-gen en_US.UTF-8
+    echo 'Downloading QIDI Studio AppImage (with retries)'
+    echo 'Downloading with curl (retries)'
+    curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$QIDI_URL" -o /usr/local/bin/QIDIStudio
+    chmod +x /usr/local/bin/QIDIStudio
+    EOC
 )
 
     if [ "$DRY_RUN" = true ]; then
@@ -302,14 +307,14 @@ if [ -n "$D_FILE" ]; then
     fi
 
     [ -x "$(command -v update-desktop-database)" ] && update-desktop-database ~/.local/share/applications
-    echo -e "${GREEN}✅ Installation successful!${NC}"
+    echo -e "${GREEN}Installation successful!${NC}"
     echo -e "You can now find 'QIDI Studio' in your app menu."
 else
     if [ "$DRY_RUN" = true ]; then
         log "INFO" "DRY RUN: desktop file would be created at ~/.local/share/applications/*qidi*.desktop"
         exit 0
     fi
-    echo -e "${RED}❌ Export failed. Desktop file not found.${NC}"
+    echo -e "${RED}Export failed. Desktop file not found.${NC}"
     echo "See $LOG_FILE for details"
     exit 1
 fi
