@@ -24,7 +24,7 @@ SOFTWARE.
 
 ## 🤖 Credits & Acknowledgements
 
-The development of these installation scripts, container configurations, and the overall logic of **AnySlicer-Next-CachyBox** was created with the assistance of an **AI Assistant (Google Gemini)**. 
+The development of these installation scripts, container configurations, and the overall logic of **QiDi-Studio-CachyBox** was created with the assistance of an **AI Assistant (Google Gemini)**. 
 
 The AI helped in:
 - Crafting cross-shell compatible scripts (Fish & Bash).
@@ -34,11 +34,11 @@ The AI helped in:
 
 ---
 
-## ⚖️ Disclaimer regarding Anycubic Slicer Next
+## ⚖️ Disclaimer regarding QIDI Studio
 
 The license above applies strictly to the automation scripts (`install.fish`, `install.sh`, etc.), the `Containerfiles`, and the `docker-compose.yml` found in this repository. 
 
 **Please note:**
-- **Anycubic Slicer Next** is a proprietary software product owned by **Anycubic**. This project does not distribute the software itself but provides automation tools to download and install it from official Anycubic resources.
-- By using these scripts, you agree to Anycubic's original End User License Agreement (EULA) and terms of service.
-- The developers of this project are not affiliated with Anycubic.
+- **QIDI Studio** is a proprietary software product owned by **QIDITECH**. This project does not distribute the software itself but provides automation tools to download and install it from official QIDIStudio resources.
+- By using these scripts, you agree to QIDI Studio's original End User License Agreement (EULA) and terms of service.
+- The developers of this project are not affiliated with QIDITECH.

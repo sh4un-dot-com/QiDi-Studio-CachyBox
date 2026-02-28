@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  anycubic-slicer:
+  qidi-studio:
     # Set the image name.
-    # Defaults to 'anycubic-custom-amd' if the variable is not set.
-    image: ${ANYCUBIC_IMAGE:-anycubic-custom-amd}
-    container_name: anycubic-slicer-compose
+    # Defaults to 'qidi-custom-amd' if the variable is not set.
+    image: ${QIDI_IMAGE:-qidi-custom-amd}
+    container_name: qidi-studio-compose
 
     # Use host networking for seamless X11/Wayland communication
     network_mode: host
@@ -39,4 +39,4 @@ services:
       - /dev/dri:/dev/dri:rw
 
     # The command to start the slicer inside the container
-    command: AnycubicSlicerNext
+    command: QIDIStudio
