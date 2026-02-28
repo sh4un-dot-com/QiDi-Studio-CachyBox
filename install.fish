@@ -70,13 +70,15 @@ function log
 end
 
 function spinner
-    # simple spinner for a pid (indexed, avoids heavy substitution)
+    # simple spinner for a pid (compatible with older fish)
     set pid $argv[1]
     set chars "|/-\\"
-    set len (string length -- $chars)
+    set len (echo $chars | wc -c)
     set i 1
     while ps -p $pid > /dev/null
-        printf " [%c]  " (string index $i $chars)
+        # extract the i-th character
+        set char (echo $chars | cut -c$i)
+        printf " [%s]  " $char
         set i (math "($i % $len) + 1")
         sleep 0.1
         printf "\b\b\b\b\b\b"
