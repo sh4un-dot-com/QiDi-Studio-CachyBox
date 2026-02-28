@@ -17,6 +17,9 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/install.log"
 LAST_STEP_FILE="$LOG_DIR/last_failed_step"
 
+# default download URL (can be overridden with --url)
+QIDI_URL="https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage"
+
 # Prevent running as root: distrobox commands do not behave correctly under sudo
 if [ "$(id -u)" -eq 0 ]; then
     echo "ERROR: Do not run this installer with sudo or as root."
@@ -27,6 +30,9 @@ fi
 
 NON_INTERACTIVE=false
 DRY_RUN=false
+PRECHECK=false
+UNINSTALL=false
+CONTAINER_NAME="qidi-studio"
 
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -34,19 +40,32 @@ while [[ "$#" -gt 0 ]]; do
             NON_INTERACTIVE=true; shift ;;
         --dry-run)
             DRY_RUN=true; shift ;;
+        --check)
+            PRECHECK=true; shift ;;
+        --uninstall)
+            UNINSTALL=true; shift ;;
+        --url)
+            QIDI_URL="$2"; shift 2 ;;
+        --container-name)
+            CONTAINER_NAME="$2"; shift 2 ;;
+        --gpu)
+            gpu_choice="$2"; shift 2 ;;
+        --image-source)
+            img_choice="$2"; shift 2 ;;
         --log-file)
             LOG_FILE="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: $0 [--non-interactive] [--dry-run] [--log-file FILE]"; exit 0 ;;
+            echo "Usage: $0 [--non-interactive] [--dry-run] [--check] [--uninstall] [--url URL] [--container-name NAME]";
+            exit 0 ;;
         *) shift ;;
     esac
 done
 
-log(){
-    local level="$1"; shift
-    local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    echo -e "[$ts] [$level] $*" | tee -a "$LOG_FILE"
-}
+# if uninstall flag passed, delegate to uninstaller script in same directory
+if [ "$UNINSTALL" = true ]; then
+    log "INFO" "Switching to uninstaller mode"
+    exec bash "$(dirname "$0")/uninstall.sh" --container-name "$CONTAINER_NAME" $( [ "$NON_INTERACTIVE" = true ] && echo --yes ) $( [ "$DRY_RUN" = true ] && echo --dry-run )
+fi
 
 fail(){
     local msg="$1"; shift
@@ -78,6 +97,54 @@ download_with_retries(){
     return 1
 }
 
+# spinner for background operations
+spinner(){
+    local pid=$1
+    local delay=0.1
+    local spinstr='|/-\\'
+    while ps -p $pid > /dev/null 2>&1; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        spinstr=$temp${spinstr%$temp}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+}
+
+# preflight checks
+preflight(){
+    log "INFO" "Running preflight checks"
+    # check required commands
+    for cmd in distrobox podman curl lspci; do
+        if ! command -v $cmd &>/dev/null; then
+            log "WARN" "Command $cmd not found. Installer may attempt to install it or fail."
+            case $cmd in
+                distrobox|podman)
+                    echo "Install via your package manager (apt/pacman/dnf) or see https://github.com/89luca89/distrobox";
+                    ;;
+                curl)
+                    echo "Install curl (apt install curl)";
+                    ;;
+                lspci)
+                    echo "Install pciutils (apt install pciutils)";
+                    ;;
+            esac
+        fi
+    done
+    # network check
+    if ! ping -c1 github.com &>/dev/null; then
+        log "WARN" "Network appears unreachable; downloads will fail."
+        echo "WARNING: network check failed"
+    fi
+    # disk space
+    avail=$(df --output=avail -k . | tail -1)
+    if [ "$avail" -lt 1048576 ]; then
+        log "WARN" "Less than 1GB free; installation may fail."
+    fi
+    echo "preflight complete"
+}
+
+
 run_in_container(){
     # run command in distrobox container and stream output to log
     local cmd="$*"
@@ -85,18 +152,30 @@ run_in_container(){
         log "INFO" "DRY RUN: would run in container: $cmd"
         return 0
     fi
-    distrobox enter qidi-studio -- bash -lc "$cmd" 2>&1 | tee -a "$LOG_FILE"
+    distrobox enter "$CONTAINER_NAME" -- bash -lc "$cmd" 2>&1 | tee -a "$LOG_FILE"
     return ${PIPESTATUS[0]:-0}
 }
 
 
 # --- Download URL for the latest AppImage release ---
-QIDI_URL="https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage"
+# (may be overridden with --url)
+
+# if --check was given, run preflight and exit
+if [ "$PRECHECK" = true ]; then
+    preflight
+    exit 0
+fi
+
 
 # --- GPU Selection ---
 # detect hardware and ask the user to choose a driver stack
 
 echo -e "\n${YELLOW}--- GPU Selection ---${NC}"
+
+# allow overriding via CLI
+if [ -n "$gpu_choice" ]; then
+    log "INFO" "Using GPU selection from CLI: $gpu_choice"
+fi
 detected_gpu="none"
 if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     detected_gpu="nvidia"
@@ -201,8 +280,8 @@ USE_DNS=false
 
 while [ "$SUCCESS" = false ]; do
     # Cleanup old container if exists
-    if distrobox list | grep -q "qidi-studio"; then
-        distrobox rm -f qidi-studio
+    if distrobox list | grep -q "$CONTAINER_NAME"; then
+        distrobox rm -f "$CONTAINER_NAME"
     fi
 
     CURRENT_ADD_FLAGS="$ADD_FLAGS"
@@ -237,7 +316,8 @@ while [ "$SUCCESS" = false ]; do
             if [ "$DRY_RUN" = true ]; then
                 log "INFO" "DRY RUN: would run podman build -t qidi-custom-$GPU_TYPE -f $CONTAINERFILE ."
             else
-                podman build -t "qidi-custom-$GPU_TYPE" -f "$CONTAINERFILE" . 2>&1 | tee -a "$LOG_FILE"
+                podman build -t "qidi-custom-$GPU_TYPE" -f "$CONTAINERFILE" . 2>&1 | tee -a "$LOG_FILE" &
+                spinner $!
             fi
             IMAGE_NAME="qidi-custom-$GPU_TYPE"
         else
@@ -245,12 +325,14 @@ while [ "$SUCCESS" = false ]; do
         fi
     fi
 
-    echo -e "${BLUE}Creating Distrobox container...${NC}"
+echo -e "${BLUE}Creating Distrobox container...${NC}"
     LAST_STEP="container:create"
     if [ "$DRY_RUN" = true ]; then
-        log "INFO" "DRY RUN: would run: distrobox create --name qidi-studio --image $IMAGE_NAME $GPU_FLAG --additional-flags '$CURRENT_ADD_FLAGS' --yes"
+        log "INFO" "DRY RUN: would run: distrobox create --name $CONTAINER_NAME --image $IMAGE_NAME $GPU_FLAG --additional-flags '$CURRENT_ADD_FLAGS' --yes"
     else
-        distrobox create --name qidi-studio --image $IMAGE_NAME $GPU_FLAG --additional-flags "$CURRENT_ADD_FLAGS" --yes 2>&1 | tee -a "$LOG_FILE"
+        distrobox create --name "$CONTAINER_NAME" --image $IMAGE_NAME $GPU_FLAG --additional-flags "$CURRENT_ADD_FLAGS" --yes 2>&1 | tee -a "$LOG_FILE" &
+        pid=$!
+        spinner $pid
     fi
 
     echo -e "\n${YELLOW}Installing basic packages. This might take a few minutes...${NC}"
@@ -270,15 +352,18 @@ while [ "$SUCCESS" = false ]; do
     echo 'Downloading with curl (retries)'
     curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$QIDI_URL" -o /usr/local/bin/QIDIStudio
     chmod +x /usr/local/bin/QIDIStudio
-    EOC
+EOC
 )
 
     if [ "$DRY_RUN" = true ]; then
         log "INFO" "DRY RUN: would run install commands inside container"
     else
         # run and capture exit code
-        distrobox enter qidi-studio -- bash -lc "$install_cmds" 2>&1 | tee -a "$LOG_FILE"
-        install_rc=${PIPESTATUS[0]:-0}
+        distrobox enter "$CONTAINER_NAME" -- bash -lc "$install_cmds" 2>&1 | tee -a "$LOG_FILE" &
+        pid=$!
+        spinner $pid
+        wait $pid
+        install_rc=$?
         if [ $install_rc -eq 0 ]; then
             SUCCESS=true
         else
@@ -299,7 +384,7 @@ log "INFO" "Exporting application"
 if [ "$DRY_RUN" = true ]; then
     log "INFO" "DRY RUN: would run distrobox-export for QIDIStudio"
 else
-    distrobox enter qidi-studio -- distrobox-export --app QIDIStudio 2>&1 | tee -a "$LOG_FILE"
+    distrobox enter $CONTAINER_NAME -- distrobox-export --app QIDIStudio 2>&1 | tee -a "$LOG_FILE"
 fi
 
 D_FILE=$(find ~/.local/share/applications -name "*qidi*.desktop" | head -n 1)
@@ -311,7 +396,7 @@ if [ -n "$D_FILE" ]; then
     # Apply Auto-Stop logic
     OLD_EXEC=$(grep "Exec=" "$D_FILE" | cut -d'=' -f2-)
     if ! grep -q "distrobox stop" "$D_FILE"; then
-        sed -i "s|Exec=.*|Exec=sh -c \"$OLD_EXEC; distrobox stop qidi-studio --yes\"|" "$D_FILE"
+        sed -i "s|Exec=.*|Exec=sh -c \"$OLD_EXEC; distrobox stop $CONTAINER_NAME --yes\"|" "$D_FILE"
     fi
 
     [ -x "$(command -v update-desktop-database)" ] && update-desktop-database ~/.local/share/applications
