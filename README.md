@@ -33,8 +33,8 @@ Ensure your host system has the following installed:
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/Slashdacoda/AnySlicer-Next-CachyBox.git
-   cd AnySlicer-Next-CachyBox
+   git clone https://github.com/sh4un-dot-com/QiDi-Studio-CachyBox.git
+   cd QiDi-Studio-CachyBox
    ```
 
 
