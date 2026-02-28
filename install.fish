@@ -74,7 +74,8 @@ function spinner
     set pid $argv[1]
     set spinstr "|/-\\"
     while ps -p $pid > /dev/null
-        set temp (string sub -s 2 $spinstr)
+        # use -- to avoid treating leading '-' in spinstr as option
+        set temp (string sub -s 2 -- $spinstr)
         printf " [%c]  " $spinstr[1]
         set spinstr "$temp$spinstr[1]"
         sleep 0.1
