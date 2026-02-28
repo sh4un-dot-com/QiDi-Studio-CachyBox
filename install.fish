@@ -70,14 +70,14 @@ function log
 end
 
 function spinner
-    # simple spinner for a pid
+    # simple spinner for a pid (indexed, avoids heavy substitution)
     set pid $argv[1]
-    set spinstr "|/-\\"
+    set chars "|/-\\"
+    set len (string length -- $chars)
+    set i 1
     while ps -p $pid > /dev/null
-        # use -- to avoid treating leading '-' in spinstr as option
-        set temp (string sub -s 2 -- $spinstr)
-        printf " [%c]  " $spinstr[1]
-        set spinstr "$temp$spinstr[1]"
+        printf " [%c]  " (string index $i $chars)
+        set i (math "($i % $len) + 1")
         sleep 0.1
         printf "\b\b\b\b\b\b"
     end
