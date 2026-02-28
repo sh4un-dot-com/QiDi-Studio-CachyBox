@@ -13,6 +13,14 @@ set LOG_FILE "$LOG_DIR/install.log"
 set NON_INTERACTIVE false
 set DRY_RUN false
 
+# Prevent running as root: distrobox commands do not behave correctly under sudo
+if test (id -u) -eq 0
+    echo "ERROR: Do not run this installer with sudo or as root."
+    echo "Please run as your regular user (no sudo): ./install.fish"
+    echo "If you intentionally need root distrobox operations, re-run without this script or use distrobox --root commands as documented."
+    exit 1
+end
+
 for arg in $argv
     switch $arg
         case --non-interactive --yes -y

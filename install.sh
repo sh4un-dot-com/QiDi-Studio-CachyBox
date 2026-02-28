@@ -17,6 +17,14 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/install.log"
 LAST_STEP_FILE="$LOG_DIR/last_failed_step"
 
+# Prevent running as root: distrobox commands do not behave correctly under sudo
+if [ "$(id -u)" -eq 0 ]; then
+    echo "ERROR: Do not run this installer with sudo or as root."
+    echo "Please run as your regular user (no sudo): ./install.sh"
+    echo "If you intentionally need root distrobox operations, re-run without this script or use distrobox --root commands as documented."
+    exit 1
+fi
+
 NON_INTERACTIVE=false
 DRY_RUN=false
 
