@@ -206,7 +206,9 @@ echo "1) Nvidia (uses --nvidia flag)"
 echo "2) AMD (uses DRI pass-through)"
 echo "3) Intel (uses DRI pass-through)"
 echo "4) Generic / None / Software Rendering"
-if [ "$NON_INTERACTIVE" = true ]; then
+if [ -n "$gpu_choice" ]; then
+    log "INFO" "Using GPU from CLI: $gpu_choice"
+elif [ "$NON_INTERACTIVE" = true ]; then
     gpu_choice=$gpu_default
     log "INFO" "Non-interactive: selecting GPU stack $gpu_choice"
 else
@@ -230,7 +232,9 @@ esac
 echo -e "\n${YELLOW}--- Step 2: Image Source ---${NC}"
 echo "1) Standard Ubuntu 24.04 from DockerHub (Default)"
 echo "2) Custom Local Containerfile (Build locally)"
-if [ "$NON_INTERACTIVE" = true ]; then
+if [ -n "$img_choice" ]; then
+    log "INFO" "Using image source from CLI: $img_choice"
+elif [ "$NON_INTERACTIVE" = true ]; then
     img_choice=1
     log "INFO" "Non-interactive: selecting image source $img_choice"
 else
@@ -294,7 +298,7 @@ while [ "$SUCCESS" = false ]; do
         fi
     fi
 
-echo -e "${BLUE}Creating Distrobox container...${NC}"
+    echo -e "${BLUE}Creating Distrobox container...${NC}"
     LAST_STEP="container:create"
     if [ "$DRY_RUN" = true ]; then
         log "INFO" "DRY RUN: would run: distrobox create --name $CONTAINER_NAME --image $IMAGE_NAME $GPU_FLAG --additional-flags '$CURRENT_ADD_FLAGS' --yes"

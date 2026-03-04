@@ -60,7 +60,11 @@ echo -e "--------------------------------------------------------$normal"
 # 1. Remove the app export (menu entries and binaries)
 if distrobox list | grep -q "$CONTAINER_NAME"
     log INFO "--- Step 1: Unexporting Application ---"
-    distrobox enter "$CONTAINER_NAME" -- distrobox-export --app QIDIStudio --delete
+    if test "$DRY_RUN" = "true"
+        log INFO "DRY RUN: would unexport QIDIStudio from $CONTAINER_NAME"
+    else
+        distrobox enter "$CONTAINER_NAME" -- distrobox-export --app QIDIStudio --delete
+    end
 end
 
 # 2. Remove the Distrobox container

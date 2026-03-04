@@ -165,7 +165,9 @@ end
 echo -e "\n$yellow--- Step 2: Image Source ---$normal"
 echo "1) Standard Ubuntu 24.04 from DockerHub (Default)"
 echo "2) Custom Local Containerfile (Build locally)"
-if test "$NON_INTERACTIVE" = "true"
+if test -n "$img_choice"
+    log INFO "Using image source from CLI: $img_choice"
+else if test "$NON_INTERACTIVE" = "true"
     set img_choice 1
     log INFO "Non-interactive: selecting image source $img_choice"
 else
@@ -187,13 +189,13 @@ if test "$img_choice" = "2"
         end
         set image_name "qidi-custom-$g_type"
     else
-        echo -e "{$red}Warning: $c_file not found, using standard image.$normal"
+        echo -e "$red""Warning: $c_file not found, using standard image.""$normal"
     end
 end
 
 # Inform user what's next and where logs will go
 log INFO "Starting installation loop. Output will stream to console and $LOG_FILE"
-echo "\nStarting installation — streaming output to console and log: $LOG_FILE\n"
+echo -e "\nStarting installation — streaming output to console and log: $LOG_FILE\n"
 
 # --- Step 3: Installation Loop with DNS Retry ---
 set use_custom_dns false; set install_success false
@@ -201,7 +203,7 @@ while test "$install_success" = false
     if distrobox list | grep -q "$CONTAINER_NAME"; distrobox rm -f "$CONTAINER_NAME"; end
     set current_add_flags "$add_flags"
     if test "$use_custom_dns" = true
-        echo -e "$yellowDNS issues detected. Retrying with explicit DNS...$normal"
+        echo -e "$yellow""DNS issues detected. Retrying with explicit DNS...""$normal"
         set current_add_flags "$current_add_flags --dns 1.1.1.1 --dns 8.8.8.8"
     end
 
@@ -211,7 +213,7 @@ while test "$install_success" = false
         distrobox create --name "$CONTAINER_NAME" --image $image_name $gpu_flags --additional-flags "$current_add_flags" --yes 2>&1 | tee -a $LOG_FILE &
         spinner $last_pid
     end
-    echo -e "\n$yellowInstalling basic packages. This might take a few minutes...$normal"
+    echo -e "\n$yellow""Installing basic packages. This might take a few minutes...""$normal"
 
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: would enter container and run apt update/install and download QIDI AppImage"
@@ -250,13 +252,13 @@ if test -n "$d_file"
     if type -q update-desktop-database
         update-desktop-database ~/.local/share/applications
     end
-    echo -e "$greenDone! Container stops automatically on exit.$normal"
+    echo -e "$green""Done! Container stops automatically on exit.""$normal"
 else
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: desktop file would be created at ~/.local/share/applications/*qidi*.desktop"
         exit 0
     end
-    echo -e "{$red}Export failed. Desktop file not found.$normal"
+    echo -e "$red""Export failed. Desktop file not found.""$normal"
     echo "See $LOG_FILE for details"
     exit 1
 end
