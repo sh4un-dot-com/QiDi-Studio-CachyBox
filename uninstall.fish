@@ -13,27 +13,44 @@ set NON_INTERACTIVE false
 set DRY_RUN false
 
 # CLI parsing
-for arg in $argv
-    switch $arg
+set i 1
+while test $i -le (count $argv)
+    switch $argv[$i]
         case --container-name
-            set CONTAINER_NAME $argv[(contains --container-name $argv); math (contains --container-name $argv) + 1]
-            break
+            set i (math $i + 1)
+            set CONTAINER_NAME $argv[$i]
         case --non-interactive --yes -y
             set NON_INTERACTIVE true
-            break
         case --dry-run
             set DRY_RUN true
-            break
         case --log-file
-            set LOG_FILE $argv[(contains --log-file $argv); math (contains --log-file $argv) + 1]
-            break
+            set i (math $i + 1)
+            set LOG_FILE $argv[$i]
+        case --help -h
+            echo "Usage: "(status filename)" [--container-name NAME] [--non-interactive] [--dry-run]"
+            exit 0
     end
+    set i (math $i + 1)
 end
 
 function log
     set level $argv[1]; set -e argv[1]
     set ts (date -u +"%Y-%m-%dT%H:%M:%SZ")
     echo "[$ts] [$level] $argv" | tee -a $LOG_FILE
+end
+
+function spinner
+    set pid $argv[1]
+    set chars "|/-\\"
+    set len (string length $chars)
+    set i 1
+    while ps -p $pid > /dev/null 2>&1
+        set char (string sub -s $i -l 1 -- $chars)
+        printf " [%s]  " $char
+        set i (math "($i % $len) + 1")
+        sleep 0.1
+        printf "\b\b\b\b\b\b"
+    end
 end
 
 echo -e "$blue--------------------------------------------------------"
@@ -78,8 +95,12 @@ end
 # 4. Manual cleanup of desktop files and icons (just in case)
 echo -e "$yellow--- Step 4: Final Cleanup ---$normal"
 rm -f ~/.local/share/applications/*qidi*.desktop
+rm -f ~/.local/share/applications/*QIDIStudio*.desktop
+rm -f ~/.local/bin/QIDIStudio
 rm -f ~/.local/bin/qidi-studio*
-update-desktop-database ~/.local/share/applications
+if type -q update-desktop-database
+    update-desktop-database ~/.local/share/applications
+end
 
 # 5. Optional: Config files
 if test "$NON_INTERACTIVE" = "true"

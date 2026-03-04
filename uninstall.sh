@@ -53,10 +53,17 @@ fail(){
 
 trap 'rc=$?; if [ $rc -ne 0 ]; then log "ERROR" "Uninstaller exited with code $rc (last step: $LAST_STEP)"; fi' EXIT
 
+LAST_STEP="init"
+
 # 1. Unexport the application (removes menu entries and binaries)
 if distrobox list | grep -q "$CONTAINER_NAME"; then
     log INFO "--- Step 1: Removing Menu Entries & Binaries ---"
-    distrobox enter "$CONTAINER_NAME" -- distrobox-export --app QIDIStudio --delete
+    LAST_STEP="unexport"
+    if [ "$DRY_RUN" = true ]; then
+        log INFO "DRY RUN: would unexport QIDIStudio from $CONTAINER_NAME"
+    else
+        distrobox enter "$CONTAINER_NAME" -- distrobox-export --app QIDIStudio --delete
+    fi
 else
     log INFO "No active container '$CONTAINER_NAME' found for unexporting."
 fi

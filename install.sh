@@ -73,6 +73,8 @@ if [ "$UNINSTALL" = true ]; then
     exec bash "$(dirname "$0")/uninstall.sh" --container-name "$CONTAINER_NAME" $( [ "$NON_INTERACTIVE" = true ] && echo --yes ) $( [ "$DRY_RUN" = true ] && echo --dry-run )
 fi
 
+LAST_STEP="init"
+
 fail(){
     local msg="$1"; shift
     echo
@@ -217,45 +219,6 @@ ADD_FLAGS=""
 GPU_TYPE="generic"
 CONTAINERFILE="containerfile.amd"
 
-# continue with chosen values
-
-# (containerfile default set earlier)
-echo -e "\n${YELLOW}--- Step 2: GPU Selection ---${NC}"
-detected_gpu="none"
-if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
-    detected_gpu="nvidia"
-elif lspci | grep -Ei "VGA|3D" | grep -iq "AMD"; then
-    detected_gpu="amd"
-elif lspci | grep -Ei "VGA|3D" | grep -iq "Intel"; then
-    detected_gpu="intel"
-fi
-
-echo -e "Detected Hardware: ${GREEN}$detected_gpu${NC}"
-
-gpu_default="4"
-case $detected_gpu in
-    "nvidia") gpu_default="1" ;;
-    "amd")    gpu_default="2" ;;
-    "intel")  gpu_default="3" ;;
-esac
-
-echo "1) Nvidia (uses --nvidia flag)"
-echo "2) AMD (uses DRI pass-through)"
-echo "3) Intel (uses DRI pass-through)"
-echo "4) Generic / None / Software Rendering"
-if [ "$NON_INTERACTIVE" = true ]; then
-    gpu_choice=$gpu_default
-    log "INFO" "Non-interactive: selecting GPU stack $gpu_choice"
-else
-    read -p "Select Driver Stack [$gpu_default]: " gpu_choice
-    gpu_choice=${gpu_choice:-$gpu_default}
-fi
-
-GPU_FLAG=""
-ADD_FLAGS=""
-GPU_TYPE="generic"
-CONTAINERFILE="containerfile.amd"
-
 case $gpu_choice in
     1) GPU_FLAG="--nvidia"; GPU_TYPE="nvidia"; CONTAINERFILE="containerfile.nvidia" ;;
     2) ADD_FLAGS="--device /dev/dri:/dev/dri"; GPU_TYPE="amd"; CONTAINERFILE="containerfile.amd" ;;
@@ -263,8 +226,8 @@ case $gpu_choice in
     *) GPU_TYPE="generic"; CONTAINERFILE="containerfile.amd" ;;
 esac
 
-# --- Step 3: Image Source ---
-echo -e "\n${YELLOW}--- Step 3: Image Source ---${NC}"
+# --- Step 2: Image Source ---
+echo -e "\n${YELLOW}--- Step 2: Image Source ---${NC}"
 echo "1) Standard Ubuntu 24.04 from DockerHub (Default)"
 echo "2) Custom Local Containerfile (Build locally)"
 if [ "$NON_INTERACTIVE" = true ]; then
@@ -280,7 +243,7 @@ LAST_STEP="start"
 log "INFO" "Starting installation loop. Output will stream to console and $LOG_FILE"
 echo -e "\nStarting installation — streaming output to console and log: $LOG_FILE\n"
 
-# --- Step 4: Installation Loop with DNS Retry ---
+# --- Step 3: Installation Loop with DNS Retry ---
 SUCCESS=false
 USE_DNS=false
 
@@ -346,7 +309,7 @@ echo -e "${BLUE}Creating Distrobox container...${NC}"
     # Package list fixed for Ubuntu 24.04 (Noble)
     LAST_STEP="install:packages"
     log "INFO" "Installing packages and downloading application inside container"
-    install_cmds=$(cat <<'EOC'
+    install_cmds=$(cat <<EOC
     set -euo pipefail
     echo 'Running: apt update'
     sudo apt update
@@ -363,6 +326,7 @@ EOC
 
     if [ "$DRY_RUN" = true ]; then
         log "INFO" "DRY RUN: would run install commands inside container"
+        SUCCESS=true
     else
         # run and capture exit code
         distrobox enter "$CONTAINER_NAME" -- bash -lc "$install_cmds" 2>&1 | tee -a "$LOG_FILE" &
@@ -383,7 +347,7 @@ EOC
     fi
 done
 
-# --- Step 5: Export & Final Fixes ---
+# --- Step 4: Export & Final Fixes ---
 echo -e "\n${BLUE}🔗 Exporting application and applying fixes...${NC}"
 LAST_STEP="export:app"
 log "INFO" "Exporting application"

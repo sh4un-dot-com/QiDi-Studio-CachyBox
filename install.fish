@@ -22,33 +22,42 @@ if test (id -u) -eq 0
 end
 
 set PRECHECK false
+set UNINSTALL false
 set QIDI_URL "https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage"
 set CONTAINER_NAME "qidi-studio"
-for arg in $argv
-    switch $arg
+set gpu_choice ""
+set img_choice ""
+set i 1
+while test $i -le (count $argv)
+    switch $argv[$i]
         case --non-interactive --yes -y
             set NON_INTERACTIVE true
-            break
         case --dry-run
             set DRY_RUN true
-            break
         case --check
             set PRECHECK true
-            break
         case --uninstall
             set UNINSTALL true
-            break
         case --url
-            # next arg is url
-            set QIDI_URL $argv[(contains --url $argv); math (contains --url $argv) + 1]
-            break
+            set i (math $i + 1)
+            set QIDI_URL $argv[$i]
         case --container-name
-            set CONTAINER_NAME $argv[(contains --container-name $argv); math (contains --container-name $argv) + 1]
-            break
+            set i (math $i + 1)
+            set CONTAINER_NAME $argv[$i]
         case --log-file
-            set LOG_FILE $argv[(contains --log-file $argv); math (contains --log-file $argv) + 1]
-            break
+            set i (math $i + 1)
+            set LOG_FILE $argv[$i]
+        case --gpu
+            set i (math $i + 1)
+            set gpu_choice $argv[$i]
+        case --image-source
+            set i (math $i + 1)
+            set img_choice $argv[$i]
+        case --help -h
+            echo "Usage: $_ [--non-interactive] [--dry-run] [--check] [--uninstall] [--url URL] [--container-name NAME] [--gpu 1-4] [--image-source 1-2]"
+            exit 0
     end
+    set i (math $i + 1)
 end
 
 if test "$UNINSTALL" = "true"
@@ -60,7 +69,8 @@ if test "$UNINSTALL" = "true"
     if test "$DRY_RUN" = "true"
         set extra_args $extra_args --dry-run
     end
-    exec bash "$(dirname "$0")/uninstall.sh" --container-name "$CONTAINER_NAME" $extra_args
+    set script_dir (dirname (status filename))
+    exec fish "$script_dir/uninstall.fish" --container-name $CONTAINER_NAME $extra_args
 end
 
 function log
@@ -120,6 +130,8 @@ echo -e "\n$yellow--- GPU Selection ---$normal"
 
 if test -n "$gpu_choice"
     log INFO "Using GPU selection from CLI: $gpu_choice"
+else
+    set gpu_choice ""
 end
 set detected_gpu "none"
 if type -q nvidia-smi; if nvidia-smi > /dev/null 2>&1; set detected_gpu "nvidia"; end; end
@@ -132,7 +144,10 @@ echo -e "Detected Hardware: $green$detected_gpu$normal"
 set g_def "4"; switch $detected_gpu; case "nvidia"; set g_def "1"; case "amd"; set g_def "2"; case "intel"; set g_def "3"; end
 
 echo "1) Nvidia  2) AMD  3) Intel  4) Generic"
-if test "$NON_INTERACTIVE" = "true"
+if test -n "$gpu_choice"
+    set g_choice $gpu_choice
+    log INFO "Using GPU from CLI: $g_choice"
+else if test "$NON_INTERACTIVE" = "true"
     set g_choice $g_def
     log INFO "Non-interactive: selecting GPU stack $g_choice"
 else
@@ -158,6 +173,24 @@ else
     if test -z "$img_choice"; set img_choice "1"; end
 end
 
+# --- Image Preparation ---
+set image_name "ubuntu:24.04"
+if test "$img_choice" = "2"
+    if test -f "$c_file"
+        log INFO "Building local image from $c_file"
+        if test "$DRY_RUN" = "true"
+            log INFO "DRY RUN: would run podman build -t qidi-custom-$g_type -f $c_file ."
+        else
+            podman build -t "qidi-custom-$g_type" -f "$c_file" . 2>&1 | tee -a $LOG_FILE &
+            spinner $last_pid
+            wait $last_pid
+        end
+        set image_name "qidi-custom-$g_type"
+    else
+        echo -e "{$red}Warning: $c_file not found, using standard image.$normal"
+    end
+end
+
 # Inform user what's next and where logs will go
 log INFO "Starting installation loop. Output will stream to console and $LOG_FILE"
 echo "\nStarting installation — streaming output to console and log: $LOG_FILE\n"
@@ -173,9 +206,9 @@ while test "$install_success" = false
     end
 
     if test "$DRY_RUN" = "true"
-        log INFO "DRY RUN: would create distrobox container: distrobox create --name $CONTAINER_NAME --image ubuntu:24.04 $gpu_flags --additional-flags \"$current_add_flags\" --yes"
+        log INFO "DRY RUN: would create distrobox container: distrobox create --name $CONTAINER_NAME --image $image_name $gpu_flags --additional-flags \"$current_add_flags\" --yes"
     else
-        distrobox create --name "$CONTAINER_NAME" --image ubuntu:24.04 $gpu_flags --additional-flags "$current_add_flags" --yes 2>&1 | tee -a $LOG_FILE &
+        distrobox create --name "$CONTAINER_NAME" --image $image_name $gpu_flags --additional-flags "$current_add_flags" --yes 2>&1 | tee -a $LOG_FILE &
         spinner $last_pid
     end
     echo -e "\n$yellowInstalling basic packages. This might take a few minutes...$normal"
@@ -214,12 +247,17 @@ if test -n "$d_file"
     sed -i 's|/run/host||' $d_file
     set exec_cmd (grep "Exec=" $d_file | cut -d'=' -f2-)
     sed -i "s|Exec=.*|Exec=sh -c \"$exec_cmd; distrobox stop $CONTAINER_NAME --yes\"|" $d_file
-    update-desktop-database ~/.local/share/applications
+    if type -q update-desktop-database
+        update-desktop-database ~/.local/share/applications
+    end
     echo -e "$greenDone! Container stops automatically on exit.$normal"
 else
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: desktop file would be created at ~/.local/share/applications/*qidi*.desktop"
         exit 0
     end
+    echo -e "{$red}Export failed. Desktop file not found.$normal"
+    echo "See $LOG_FILE for details"
+    exit 1
 end
 
