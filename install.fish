@@ -60,6 +60,12 @@ while test $i -le (count $argv)
     set i (math $i + 1)
 end
 
+function log
+    set level $argv[1]; set -e argv[1]
+    set ts (date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo "[$ts] [$level] $argv" | tee -a $LOG_FILE
+end
+
 if test "$UNINSTALL" = "true"
     log INFO "Switching to uninstaller mode"
     set extra_args
@@ -71,12 +77,6 @@ if test "$UNINSTALL" = "true"
     end
     set script_dir (dirname (status filename))
     exec fish "$script_dir/uninstall.fish" --container-name $CONTAINER_NAME $extra_args
-end
-
-function log
-    set level $argv[1]; set -e argv[1]
-    set ts (date -u +"%Y-%m-%dT%H:%M:%SZ")
-    echo "[$ts] [$level] $argv" | tee -a $LOG_FILE
 end
 
 function spinner
@@ -183,9 +183,11 @@ if test "$img_choice" = "2"
         if test "$DRY_RUN" = "true"
             log INFO "DRY RUN: would run podman build -t qidi-custom-$g_type -f $c_file ."
         else
-            podman build -t "qidi-custom-$g_type" -f "$c_file" . 2>&1 | tee -a $LOG_FILE &
-            spinner $last_pid
-            wait $last_pid
+            podman build -t "qidi-custom-$g_type" -f "$c_file" . 2>&1 | tee -a $LOG_FILE
+            if test $pipestatus[1] -ne 0
+                log ERROR "Image build failed. See $LOG_FILE for details"
+                exit 1
+            end
         end
         set image_name "qidi-custom-$g_type"
     else
@@ -210,22 +212,25 @@ while test "$install_success" = false
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: would create distrobox container: distrobox create --name $CONTAINER_NAME --image $image_name $gpu_flags --additional-flags \"$current_add_flags\" --yes"
     else
-        distrobox create --name "$CONTAINER_NAME" --image $image_name $gpu_flags --additional-flags "$current_add_flags" --yes 2>&1 | tee -a $LOG_FILE &
-        spinner $last_pid
+        distrobox create --name "$CONTAINER_NAME" --image "$image_name" $gpu_flags --additional-flags "$current_add_flags" --yes 2>&1 | tee -a $LOG_FILE
+        if test $pipestatus[1] -ne 0
+            log ERROR "Container creation failed. See $LOG_FILE for details"
+            exit 1
+        end
     end
     echo -e "\n$yellow""Installing basic packages. This might take a few minutes...""$normal"
 
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: would enter container and run apt update/install and download QIDI AppImage"
     else
-        distrobox enter $CONTAINER_NAME -- bash -lc "set -euo pipefail; echo 'Running: apt update'; sudo apt update; echo 'Running: apt install'; sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri; sudo locale-gen en_US.UTF-8; echo 'Downloading QIDI Studio AppImage'; curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar $QIDI_URL -o /usr/local/bin/QIDIStudio; chmod +x /usr/local/bin/QIDIStudio" 2>&1 | tee -a $LOG_FILE &
-        spinner $last_pid
+        set install_cmd "set -euo pipefail; echo 'Running: apt update'; sudo apt update; echo 'Running: apt install'; sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri; sudo locale-gen en_US.UTF-8; echo 'Downloading QIDI Studio AppImage'; tmp_app=\$(mktemp); curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar $QIDI_URL -o \"\$tmp_app\"; sudo install -m 0755 \"\$tmp_app\" /usr/local/bin/QIDIStudio; rm -f \"\$tmp_app\""
+        distrobox enter "$CONTAINER_NAME" -- bash -lc "$install_cmd" 2>&1 | tee -a $LOG_FILE
+        set install_rc $pipestatus[1]
     end
     if test "$DRY_RUN" = "true"
         set install_success true
     else
-        distrobox enter "$CONTAINER_NAME" -- bash -lc "command -v QIDIStudio >/dev/null 2>&1"
-        if test $status -eq 0
+        if test $install_rc -eq 0
             set install_success true
         else
             if test "$use_custom_dns" = false
@@ -243,12 +248,21 @@ if test "$DRY_RUN" = "true"
     log INFO "DRY RUN: would run distrobox-export --app QIDIStudio"
 else
     distrobox enter "$CONTAINER_NAME" -- distrobox-export --app QIDIStudio 2>&1 | tee -a $LOG_FILE
+    if test $pipestatus[1] -ne 0
+        log ERROR "Application export failed. See $LOG_FILE for details"
+        exit 1
+    end
 end
-set d_file (find ~/.local/share/applications -name "*qidi*.desktop" | head -n 1)
+set d_file ""
+if test -d ~/.local/share/applications
+    set d_file (find ~/.local/share/applications -maxdepth 1 -iname "*qidi*.desktop" | head -n 1)
+end
 if test -n "$d_file"
     sed -i 's|/run/host||' $d_file
-    set exec_cmd (grep "Exec=" $d_file | cut -d'=' -f2-)
-    sed -i "s|Exec=.*|Exec=sh -c \"$exec_cmd; distrobox stop $CONTAINER_NAME --yes\"|" $d_file
+    set exec_cmd (grep '^Exec=' $d_file | head -n 1 | cut -d'=' -f2-)
+    if not grep -q "distrobox stop" $d_file
+        sed -i "s|Exec=.*|Exec=sh -c \"$exec_cmd; distrobox stop $CONTAINER_NAME --yes\"|" $d_file
+    end
     if type -q update-desktop-database
         update-desktop-database ~/.local/share/applications
     end

@@ -23,6 +23,16 @@ log(){
     echo -e "[$ts] [$level] $*" | tee -a "$LOG_FILE"
 }
 
+run_logged(){
+    if [ "$DRY_RUN" = true ]; then
+        log "INFO" "DRY RUN: would run: $*"
+        return 0
+    fi
+
+    "$@" 2>&1 | tee -a "$LOG_FILE"
+    return ${PIPESTATUS[0]:-0}
+}
+
 # default download URL (can be overridden with --url)
 QIDI_URL="https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage"
 
@@ -289,8 +299,7 @@ while [ "$SUCCESS" = false ]; do
             if [ "$DRY_RUN" = true ]; then
                 log "INFO" "DRY RUN: would run podman build -t qidi-custom-$GPU_TYPE -f $CONTAINERFILE ."
             else
-                podman build -t "qidi-custom-$GPU_TYPE" -f "$CONTAINERFILE" . 2>&1 | tee -a "$LOG_FILE" &
-                spinner $!
+                run_logged podman build -t "qidi-custom-$GPU_TYPE" -f "$CONTAINERFILE" . || fail "Image build failed. See $LOG_FILE for details."
             fi
             IMAGE_NAME="qidi-custom-$GPU_TYPE"
         else
@@ -303,9 +312,7 @@ while [ "$SUCCESS" = false ]; do
     if [ "$DRY_RUN" = true ]; then
         log "INFO" "DRY RUN: would run: distrobox create --name $CONTAINER_NAME --image $IMAGE_NAME $GPU_FLAG --additional-flags '$CURRENT_ADD_FLAGS' --yes"
     else
-        distrobox create --name "$CONTAINER_NAME" --image $IMAGE_NAME $GPU_FLAG --additional-flags "$CURRENT_ADD_FLAGS" --yes 2>&1 | tee -a "$LOG_FILE" &
-        pid=$!
-        spinner $pid
+        run_logged distrobox create --name "$CONTAINER_NAME" --image "$IMAGE_NAME" $GPU_FLAG --additional-flags "$CURRENT_ADD_FLAGS" --yes || fail "Container creation failed. See $LOG_FILE for details."
     fi
 
     echo -e "\n${YELLOW}Installing basic packages. This might take a few minutes...${NC}"
@@ -323,8 +330,10 @@ while [ "$SUCCESS" = false ]; do
     sudo locale-gen en_US.UTF-8
     echo 'Downloading QIDI Studio AppImage (with retries)'
     echo 'Downloading with curl (retries)'
-    curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$QIDI_URL" -o /usr/local/bin/QIDIStudio
-    chmod +x /usr/local/bin/QIDIStudio
+    tmp_app=\$(mktemp)
+    curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$QIDI_URL" -o "\$tmp_app"
+    sudo install -m 0755 "\$tmp_app" /usr/local/bin/QIDIStudio
+    rm -f "\$tmp_app"
 EOC
 )
 
@@ -332,12 +341,8 @@ EOC
         log "INFO" "DRY RUN: would run install commands inside container"
         SUCCESS=true
     else
-        # run and capture exit code
-        distrobox enter "$CONTAINER_NAME" -- bash -lc "$install_cmds" 2>&1 | tee -a "$LOG_FILE" &
-        pid=$!
-        spinner $pid
-        wait $pid
-        install_rc=$?
+        distrobox enter "$CONTAINER_NAME" -- bash -lc "$install_cmds" 2>&1 | tee -a "$LOG_FILE"
+        install_rc=${PIPESTATUS[0]:-0}
         if [ $install_rc -eq 0 ]; then
             SUCCESS=true
         else
@@ -358,17 +363,20 @@ log "INFO" "Exporting application"
 if [ "$DRY_RUN" = true ]; then
     log "INFO" "DRY RUN: would run distrobox-export for QIDIStudio"
 else
-    distrobox enter $CONTAINER_NAME -- distrobox-export --app QIDIStudio 2>&1 | tee -a "$LOG_FILE"
+    run_logged distrobox enter "$CONTAINER_NAME" -- distrobox-export --app QIDIStudio || fail "Application export failed. See $LOG_FILE for details."
 fi
 
-D_FILE=$(find ~/.local/share/applications -name "*qidi*.desktop" | head -n 1)
+D_FILE=""
+if [ -d "$HOME/.local/share/applications" ]; then
+    D_FILE=$(find "$HOME/.local/share/applications" -maxdepth 1 -iname "*qidi*.desktop" | head -n 1)
+fi
 
 if [ -n "$D_FILE" ]; then
     # Fix Icon Path
     sed -i 's|/run/host||' "$D_FILE"
 
     # Apply Auto-Stop logic
-    OLD_EXEC=$(grep "Exec=" "$D_FILE" | cut -d'=' -f2-)
+    OLD_EXEC=$(grep '^Exec=' "$D_FILE" | head -n 1 | cut -d'=' -f2-)
     if ! grep -q "distrobox stop" "$D_FILE"; then
         sed -i "s|Exec=.*|Exec=sh -c \"$OLD_EXEC; distrobox stop $CONTAINER_NAME --yes\"|" "$D_FILE"
     fi

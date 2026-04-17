@@ -86,14 +86,20 @@ Ensure your host system has the following installed:
 
 You can bypass the installer and run the container manually.
 
-1. Export the desired image variable:
-   * Fish: `set -x QIDI_IMAGE qidi-custom-amd`
-   * Bash: `export QIDI_IMAGE=qidi-custom-amd`
+1. Export the desired image and Containerfile variables:
+   * Fish: `set -x QIDI_IMAGE qidi-custom-amd; set -x QIDI_CONTAINERFILE containerfile.amd`
+   * Bash: `export QIDI_IMAGE=qidi-custom-amd; export QIDI_CONTAINERFILE=containerfile.amd`
 
-2. Launch:
+2. Optional: override the AppImage URL if you need a specific release:
+   * Fish: `set -x QIDI_URL https://github.com/QIDITECH/QIDIStudio/releases/download/.../QIDIStudio.AppImage`
+   * Bash: `export QIDI_URL=https://github.com/QIDITECH/QIDIStudio/releases/download/.../QIDIStudio.AppImage`
+
+3. Launch:
    ```bash
    podman-compose up
    ```
+
+On first launch, the compose setup builds the selected image if needed, downloads the AppImage into `~/.local/bin/QIDIStudio`, and reuses that binary on later runs.
 
 ---
 

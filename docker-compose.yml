@@ -5,6 +5,9 @@ services:
     # Set the image name.
     # Defaults to 'qidi-custom-amd' if the variable is not set.
     image: ${QIDI_IMAGE:-qidi-custom-amd}
+    build:
+      context: .
+      dockerfile: ${QIDI_CONTAINERFILE:-containerfile.amd}
     container_name: qidi-studio-compose
 
     # Use host networking for seamless X11/Wayland communication
@@ -23,6 +26,7 @@ services:
       # Locale settings to prevent decimal/formatting crashes
       - LANG=en_US.UTF-8
       - LC_ALL=en_US.UTF-8
+      - QIDI_URL=${QIDI_URL:-https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage}
 
     volumes:
       # X11 Socket for GUI
@@ -38,5 +42,14 @@ services:
       # Direct GPU access for AMD and Intel (Mesa/DRI)
       - /dev/dri:/dev/dri:rw
 
-    # The command to start the slicer inside the container
-    command: QIDIStudio
+    # Download the AppImage on first run, then launch it from the mounted home directory.
+    command: >
+      /bin/bash -lc '
+      set -euo pipefail
+      mkdir -p "$HOME/.local/bin"
+      if [ ! -x "$HOME/.local/bin/QIDIStudio" ]; then
+        curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$QIDI_URL" -o "$HOME/.local/bin/QIDIStudio"
+        chmod +x "$HOME/.local/bin/QIDIStudio"
+      fi
+      exec "$HOME/.local/bin/QIDIStudio"
+      '
