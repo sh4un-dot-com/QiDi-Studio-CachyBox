@@ -7,7 +7,7 @@ This repository contains installer scripts and container configuration that make
 
 ## ✨ Features
 
-* **Automatic Release Fetching:** Downloads the latest QiDi Studio AppImage directly from the official GitHub releases.
+* **Latest Release Resolution:** Resolves the latest QiDi Studio Ubuntu 24 AppImage from the official GitHub releases by default, with overrides available via `--url` or `QIDI_URL`.
 * **Hardware-Aware Detection:** Automatically identifies Nvidia, AMD, or Intel GPUs and sets up the correct driver stack.
 * **Manual Hardware Override:** Allows users to force a specific driver stack (Nvidia, AMD, Intel, or Generic) during setup.
 * **Image Source Selection:** Choose between pulling a standard image from DockerHub or building a locally optimized image via specific `Containerfiles`.
@@ -24,7 +24,7 @@ Ensure your host system has the following installed:
 * **Podman** (Container Engine)
 * **Distrobox** (Container Integration Tool)
 * **curl** (for downloading releases)
-* **Nvidia-utils** (Only if you are using an Nvidia GPU)
+* **nvidia-container-toolkit** and a generated CDI spec such as `/etc/cdi/nvidia.yaml` (Only if you are using the Nvidia container path)
 
 ---
 
@@ -38,14 +38,16 @@ Ensure your host system has the following installed:
    ```
 
 
-2. **Run the installer script:**
+2. **Run the default Bash installer:**
 
-   Choose the script that matches your shell environment and make it executable:
+   Bash is the default and recommended install path:
    ```bash
-   # Bash (universal)
    chmod +x install.sh
    ./install.sh
-   # or, if you use Fish:
+   ```
+
+   If you specifically want the Fish variant instead:
+   ```bash
    chmod +x install.fish
    ./install.fish
    ```
@@ -55,7 +57,8 @@ Ensure your host system has the following installed:
    The installer will:
    * detect your GPU and let you override the driver stack (Nvidia/AMD/Intel/Generic),
    * optionally build a custom container image or pull a prebuilt one,
-   * download the latest QiDi Studio AppImage and register it with Distrobox.
+   * resolve the latest QiDi Studio Ubuntu 24 AppImage unless you override it,
+   * download that AppImage and register it with Distrobox.
 
    Once complete the application will appear in your desktop menu; closing the window automatically stops the container.
 
@@ -65,11 +68,11 @@ Ensure your host system has the following installed:
 
 | File | Purpose |
 | :--- | :--- |
-| `install.fish` | Interactive installer for CachyOS / Fish shell. |
-| `install.sh` | Universal Bash installer for any Linux distro. |
-| `uninstall.fish` / `uninstall.sh` | Clean up containers, images, and desktop entries. |
-| `Containerfile.[gpu]` | Blueprints to build a local container image (AMD, Nvidia, Intel). |
-| `docker-compose.yml` | Configuration for running QiDi Studio via `podman-compose`. |
+| `install.sh` | Default Bash installer for any Linux distro. |
+| `install.fish` | Optional Fish-shell installer variant. |
+| `uninstall.sh` / `uninstall.fish` | Clean up containers, images, and desktop entries. |
+| `containerfile.[gpu]` | Blueprints to build a local container image (AMD, Nvidia, Intel). |
+| `docker-compose.yml` | Configuration for running QiDi Studio via `podman compose` or `docker compose`. |
 
 ---
 
@@ -90,23 +93,23 @@ You can bypass the installer and run the container manually.
    * Fish: `set -x QIDI_IMAGE qidi-custom-amd; set -x QIDI_CONTAINERFILE containerfile.amd`
    * Bash: `export QIDI_IMAGE=qidi-custom-amd; export QIDI_CONTAINERFILE=containerfile.amd`
 
-2. Optional: override the AppImage URL if you need a specific release:
+2. Optional: override the AppImage URL if you need a specific release instead of the latest detected Ubuntu 24 build:
    * Fish: `set -x QIDI_URL https://github.com/QIDITECH/QIDIStudio/releases/download/.../QIDIStudio.AppImage`
    * Bash: `export QIDI_URL=https://github.com/QIDITECH/QIDIStudio/releases/download/.../QIDIStudio.AppImage`
 
 3. Launch:
    ```bash
-   podman-compose up
+   podman compose up
    ```
 
-On first launch, the compose setup builds the selected image if needed, downloads the AppImage into `~/.local/bin/QIDIStudio`, and reuses that binary on later runs.
+On first launch, the compose setup builds the selected image if needed, resolves the latest Ubuntu 24 AppImage, and caches the extracted runtime under `~/.local/share/qidi-studio/`. On later runs it only refreshes that cache when the resolved release URL changes.
 
 ---
 
 ## 🔍 Troubleshooting
 
 * **DNS errors:** Installer retries with `--dns 1.1.1.1` if it cannot resolve hosts.
-* **GUI/graphics issues:** Ensure `nvidia-container-toolkit` is installed for Nvidia cards.
+* **Nvidia install hangs at container creation:** Install `nvidia-container-toolkit`, generate a CDI spec such as `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`, then rerun the installer. Without CDI support, the installer falls back to Generic rendering.
 * **FUSE errors:** The container installs `libfuse2*`; make sure you have FUSE permissions.
 * **Broken icons:** Run `update-desktop-database ~/.local/share/applications` after install.
 
@@ -130,7 +133,9 @@ Configurations persist in `~/.config/QIDIStudio/` on the host. They remain intac
 
 ## 🗑 Uninstallation
 
-Run `./uninstall.fish` or `./uninstall.sh` to remove the container, images, and desktop entries.
+Run `./uninstall.sh` to remove the container, images, and desktop entries.
+
+If you specifically want the Fish variant, run `./uninstall.fish`.
 
 ---
 

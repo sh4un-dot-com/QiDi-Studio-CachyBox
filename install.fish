@@ -23,7 +23,14 @@ end
 
 set PRECHECK false
 set UNINSTALL false
-set QIDI_URL "https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage"
+set DEFAULT_QIDI_URL "https://github.com/QIDITECH/QIDIStudio/releases/download/v2.05.02.50/QIDIStudio_v02.05.02.50_Ubuntu24.AppImage"
+set QIDI_LATEST_API "https://api.github.com/repos/QIDITECH/QIDIStudio/releases/latest"
+if set -q QIDI_URL
+    set qidi_url_source environment
+else
+    set QIDI_URL ""
+    set qidi_url_source ""
+end
 set CONTAINER_NAME "qidi-studio"
 set gpu_choice ""
 set img_choice ""
@@ -41,6 +48,7 @@ while test $i -le (count $argv)
         case --url
             set i (math $i + 1)
             set QIDI_URL $argv[$i]
+            set qidi_url_source cli
         case --container-name
             set i (math $i + 1)
             set CONTAINER_NAME $argv[$i]
@@ -64,6 +72,69 @@ function log
     set level $argv[1]; set -e argv[1]
     set ts (date -u +"%Y-%m-%dT%H:%M:%SZ")
     echo "[$ts] [$level] $argv" | tee -a $LOG_FILE
+end
+
+function resolve_latest_qidi_url
+    if test -n "$QIDI_URL"
+        switch $qidi_url_source
+            case cli
+                log INFO "Using QIDI AppImage URL from CLI: $QIDI_URL"
+            case environment
+                log INFO "Using QIDI AppImage URL from environment: $QIDI_URL"
+        end
+        return 0
+    end
+
+    set latest_response (curl --fail -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 -H "Accept: application/vnd.github+json" $QIDI_LATEST_API 2>>$LOG_FILE)
+    set latest_url (printf "%s" "$latest_response" | grep -oE '"browser_download_url":[[:space:]]*"[^"]+Ubuntu24\.AppImage"' | head -n 1 | sed -E 's/.*"([^"]+)"/\1/')
+    if test -z "$latest_url"
+        set latest_url (printf "%s" "$latest_response" | grep -oE '"browser_download_url":[[:space:]]*"[^"]+AppImage"' | head -n 1 | sed -E 's/.*"([^"]+)"/\1/')
+    end
+
+    if test -n "$latest_url"
+        set -g QIDI_URL "$latest_url"
+        log INFO "Resolved latest QIDI Studio AppImage: $QIDI_URL"
+    else
+        set -g QIDI_URL "$DEFAULT_QIDI_URL"
+        log WARN "Unable to resolve the latest QiDi Studio release; falling back to $QIDI_URL"
+    end
+end
+
+function has_nvidia_cdi_spec
+    for cdi_dir in /etc/cdi /var/run/cdi
+        if test -d $cdi_dir
+            set spec (find $cdi_dir -maxdepth 1 -type f \( -iname '*nvidia*.yaml' -o -iname '*nvidia*.json' \) 2>/dev/null | head -n 1)
+            if test -n "$spec"
+                return 0
+            end
+        end
+    end
+    return 1
+end
+
+function has_nvidia_container_support
+    if not type -q podman
+        return 1
+    end
+    if not type -q nvidia-smi
+        return 1
+    end
+    has_nvidia_cdi_spec
+end
+
+function build_distrobox_create_cmd
+    set image_name $argv[1]
+    set gpu_flag $argv[2]
+    set additional_flags $argv[3]
+
+    set -g dbx_create_cmd distrobox create --name "$CONTAINER_NAME" --image "$image_name"
+    if test -n "$gpu_flag"
+        set -a dbx_create_cmd "$gpu_flag"
+    end
+    if test -n "$additional_flags"
+        set -a dbx_create_cmd --additional-flags "$additional_flags"
+    end
+    set -a dbx_create_cmd --yes
 end
 
 if test "$UNINSTALL" = "true"
@@ -106,6 +177,15 @@ function preflight
         log WARN "Network appears unreachable"
         echo "WARNING: network check failed"
     end
+    if type -q nvidia-smi
+        if nvidia-smi >/dev/null 2>&1
+            if not has_nvidia_container_support
+                log WARN "Nvidia GPU detected but Podman CDI support is not configured. Install nvidia-container-toolkit and generate a CDI spec before using the Nvidia path."
+                echo "WARNING: Nvidia container support is not configured for Podman."
+                echo "Install nvidia-container-toolkit and generate /etc/cdi/nvidia.yaml, or use Generic rendering."
+            end
+        end
+    end
     set avail (df --output=avail -k . | tail -n1)
     if test $avail -lt 1048576
         log WARN "Less than 1GB free disk space"
@@ -123,6 +203,8 @@ if test "$PRECHECK" = "true"
     preflight
     exit 0
 end
+
+resolve_latest_qidi_url
 
 # --- GPU Selection ---
 
@@ -152,6 +234,30 @@ else if test "$NON_INTERACTIVE" = "true"
     log INFO "Non-interactive: selecting GPU stack $g_choice"
 else
     read -P "Select Driver Stack [$g_def]: " g_choice; if test -z "$g_choice"; set g_choice "$g_def"; end
+end
+
+if test "$g_choice" = "1"
+    if not has_nvidia_container_support
+        echo -e "\n$yellow""Nvidia GPU detected, but Podman GPU support is not configured.""$normal"
+        echo "Install nvidia-container-toolkit and generate /etc/cdi/nvidia.yaml to use the Nvidia path."
+        if test "$NON_INTERACTIVE" = "true"
+            log WARN "Nvidia container support is unavailable; falling back to Generic / software rendering."
+            set g_choice 4
+        else
+            echo "1) Fall back to Generic / None / Software Rendering"
+            echo "2) Abort and configure Nvidia container support first"
+            read -P "Selection [1]: " nvidia_fallback_choice
+            if test -z "$nvidia_fallback_choice"
+                set nvidia_fallback_choice 1
+            end
+            if test "$nvidia_fallback_choice" = "2"
+                log ERROR "Aborted so Nvidia container support can be configured first."
+                exit 1
+            end
+            log WARN "Nvidia container support is unavailable; falling back to Generic / software rendering."
+            set g_choice 4
+        end
+    end
 end
 
 set gpu_flags ""; set add_flags ""; set g_type "generic"; set c_file "containerfile.amd"
@@ -209,10 +315,53 @@ while test "$install_success" = false
         set current_add_flags "$current_add_flags --dns 1.1.1.1 --dns 8.8.8.8"
     end
 
-    if test "$DRY_RUN" = "true"
-        log INFO "DRY RUN: would create distrobox container: distrobox create --name $CONTAINER_NAME --image $image_name $gpu_flags --additional-flags \"$current_add_flags\" --yes"
+    set missing_host_deps
+    for host_dep in distrobox podman
+        if not type -q $host_dep
+            set -a missing_host_deps $host_dep
+        end
+    end
+
+    if test (count $missing_host_deps) -eq 0
+        log INFO "Host dependencies already present: distrobox, podman"
+    else if test "$DRY_RUN" = "true"
+        log INFO "DRY RUN: would install missing host dependencies via system package manager: $missing_host_deps"
     else
-        distrobox create --name "$CONTAINER_NAME" --image "$image_name" $gpu_flags --additional-flags "$current_add_flags" --yes 2>&1 | tee -a $LOG_FILE
+        log INFO "Installing missing host dependencies: $missing_host_deps"
+        if type -q pacman
+            sudo pacman -S --needed --noconfirm $missing_host_deps 2>&1 | tee -a $LOG_FILE
+            if test $pipestatus[1] -ne 0
+                log ERROR "Failed to install host dependencies. See $LOG_FILE for details"
+                exit 1
+            end
+        else if type -q apt
+            sudo apt update 2>&1 | tee -a $LOG_FILE
+            if test $pipestatus[1] -ne 0
+                log ERROR "Failed to update apt metadata. See $LOG_FILE for details"
+                exit 1
+            end
+            sudo apt install -y $missing_host_deps 2>&1 | tee -a $LOG_FILE
+            if test $pipestatus[1] -ne 0
+                log ERROR "Failed to install host dependencies. See $LOG_FILE for details"
+                exit 1
+            end
+        else if type -q dnf
+            sudo dnf install -y $missing_host_deps 2>&1 | tee -a $LOG_FILE
+            if test $pipestatus[1] -ne 0
+                log ERROR "Failed to install host dependencies. See $LOG_FILE for details"
+                exit 1
+            end
+        else
+            log ERROR "Unknown package manager. Please install these dependencies manually: $missing_host_deps"
+            exit 1
+        end
+    end
+
+    build_distrobox_create_cmd "$image_name" "$gpu_flags" "$current_add_flags"
+    if test "$DRY_RUN" = "true"
+        log INFO "DRY RUN: would create distrobox container: "(string join ' ' -- $dbx_create_cmd)
+    else
+        $dbx_create_cmd 2>&1 | tee -a $LOG_FILE
         if test $pipestatus[1] -ne 0
             log ERROR "Container creation failed. See $LOG_FILE for details"
             exit 1
@@ -223,7 +372,7 @@ while test "$install_success" = false
     if test "$DRY_RUN" = "true"
         log INFO "DRY RUN: would enter container and run apt update/install and download QIDI AppImage"
     else
-        set install_cmd "set -euo pipefail; echo 'Running: apt update'; sudo apt update; echo 'Running: apt install'; sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri; sudo locale-gen en_US.UTF-8; echo 'Downloading QIDI Studio AppImage'; tmp_app=\$(mktemp); curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar $QIDI_URL -o \"\$tmp_app\"; sudo install -m 0755 \"\$tmp_app\" /usr/local/bin/QIDIStudio; rm -f \"\$tmp_app\""
+        set install_cmd "set -euo pipefail; echo 'Running: apt update'; sudo apt update; echo 'Running: apt install'; sudo apt install -y curl ca-certificates lsb-release locales libfuse2* sudo libgl1 libglx-mesa0 libegl1 libgl1-mesa-dri libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 libwayland-server0; sudo locale-gen en_US.UTF-8; echo 'Downloading QIDI Studio AppImage'; tmp_app=\$(mktemp); curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar $QIDI_URL -o \"\$tmp_app\"; chmod +x \"\$tmp_app\"; echo 'Installing desktop metadata from the AppImage'; extract_dir=\$(mktemp -d); cd \"\$extract_dir\"; \"\$tmp_app\" --appimage-extract >/dev/null; sudo rm -rf /opt/QIDIStudio; sudo mkdir -p /opt/QIDIStudio; sudo cp -a squashfs-root/. /opt/QIDIStudio/; printf 'IyEvYmluL3NoCmV4ZWMgL29wdC9RSURJU3R1ZGlvL0FwcFJ1biAiJEAiCg==' | base64 -d | sudo tee /usr/local/bin/QIDIStudio >/dev/null; sudo chmod 0755 /usr/local/bin/QIDIStudio; desktop_src=\$(find squashfs-root -name 'QIDIStudio.desktop' | head -n 1); icon_src=\$(find squashfs-root -path '*/usr/share/icons/hicolor/192x192/apps/QIDIStudio.png' -o -name 'QIDIStudio.png' | head -n 1); [ -n \"\$desktop_src\" ] || { echo 'AppImage desktop file not found'; exit 1; }; sudo install -Dm 0644 \"\$desktop_src\" /usr/share/applications/QIDIStudio.desktop; sudo sed -i 's|^Exec=.*|Exec=/usr/local/bin/QIDIStudio %F|' /usr/share/applications/QIDIStudio.desktop; if grep -q '^TryExec=' /usr/share/applications/QIDIStudio.desktop; then sudo sed -i 's|^TryExec=.*|TryExec=/usr/local/bin/QIDIStudio|' /usr/share/applications/QIDIStudio.desktop; else echo 'TryExec=/usr/local/bin/QIDIStudio' | sudo tee -a /usr/share/applications/QIDIStudio.desktop >/dev/null; fi; if [ -n \"\$icon_src\" ]; then sudo install -Dm 0644 \"\$icon_src\" /usr/share/icons/hicolor/192x192/apps/QIDIStudio.png; fi; if [ -f /run/host/usr/share/cachyos-fish-config/cachyos-config.fish ]; then sudo mkdir -p /usr/share/cachyos-fish-config; sudo ln -sfn /run/host/usr/share/cachyos-fish-config/cachyos-config.fish /usr/share/cachyos-fish-config/cachyos-config.fish; if [ -d /run/host/usr/share/cachyos-fish-config/conf.d ]; then sudo ln -sfn /run/host/usr/share/cachyos-fish-config/conf.d /usr/share/cachyos-fish-config/conf.d; fi; fi; cd /; rm -rf \"\$extract_dir\"; rm -f \"\$tmp_app\""
         distrobox enter "$CONTAINER_NAME" -- bash -lc "$install_cmd" 2>&1 | tee -a $LOG_FILE
         set install_rc $pipestatus[1]
     end
@@ -253,15 +402,22 @@ else
         exit 1
     end
 end
-set d_file ""
+set d_files
 if test -d ~/.local/share/applications
-    set d_file (find ~/.local/share/applications -maxdepth 1 -iname "*qidi*.desktop" | head -n 1)
+    set d_files (find ~/.local/share/applications -maxdepth 1 -iname "*QIDIStudio*.desktop" | sort)
+    if test (count $d_files) -eq 0
+        set d_files (find ~/.local/share/applications -maxdepth 1 -iname "*qidi*.desktop" | sort)
+    end
 end
-if test -n "$d_file"
-    sed -i 's|/run/host||' $d_file
-    set exec_cmd (grep '^Exec=' $d_file | head -n 1 | cut -d'=' -f2-)
-    if not grep -q "distrobox stop" $d_file
-        sed -i "s|Exec=.*|Exec=sh -c \"$exec_cmd; distrobox stop $CONTAINER_NAME --yes\"|" $d_file
+if test (count $d_files) -gt 0
+    for d_file in $d_files
+        sed -i 's|/run/host||' $d_file
+        set exec_cmd (grep '^Exec=' $d_file | head -n 1 | cut -d'=' -f2-)
+        if test -n "$exec_cmd"
+            if not grep -q "distrobox stop" $d_file
+                sed -i "s|Exec=.*|Exec=sh -c \"$exec_cmd; distrobox stop $CONTAINER_NAME --yes\"|" $d_file
+            end
+        end
     end
     if type -q update-desktop-database
         update-desktop-database ~/.local/share/applications

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   qidi-studio:
     # Set the image name.
@@ -26,7 +24,7 @@ services:
       # Locale settings to prevent decimal/formatting crashes
       - LANG=en_US.UTF-8
       - LC_ALL=en_US.UTF-8
-      - QIDI_URL=${QIDI_URL:-https://github.com/QIDITECH/QIDIStudio/releases/download/v2.04.01.11/QIDIStudio_v02.04.01.11_Ubuntu24.AppImage}
+      - QIDI_URL=${QIDI_URL:-}
 
     volumes:
       # X11 Socket for GUI
@@ -43,13 +41,51 @@ services:
       - /dev/dri:/dev/dri:rw
 
     # Download the AppImage on first run, then launch it from the mounted home directory.
-    command: >
-      /bin/bash -lc '
-      set -euo pipefail
-      mkdir -p "$HOME/.local/bin"
-      if [ ! -x "$HOME/.local/bin/QIDIStudio" ]; then
-        curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$QIDI_URL" -o "$HOME/.local/bin/QIDIStudio"
-        chmod +x "$HOME/.local/bin/QIDIStudio"
-      fi
-      exec "$HOME/.local/bin/QIDIStudio"
-      '
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -euo pipefail
+        resolve_latest_qidi_url() {
+          local api_url="https://api.github.com/repos/QIDITECH/QIDIStudio/releases/latest"
+          local fallback_url="https://github.com/QIDITECH/QIDIStudio/releases/download/v2.05.02.50/QIDIStudio_v02.05.02.50_Ubuntu24.AppImage"
+          local latest_response latest_url
+          latest_response=$$(curl --fail -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 -H "Accept: application/vnd.github+json" "$$api_url" || true)
+          latest_url=$$(printf "%s" "$$latest_response" | grep -oE '"browser_download_url":[[:space:]]*"[^"]+Ubuntu24\.AppImage"' | head -n 1 | sed -E 's/.*"([^"]+)"/\1/')
+          if [ -z "$$latest_url" ]; then
+            latest_url=$$(printf "%s" "$$latest_response" | grep -oE '"browser_download_url":[[:space:]]*"[^"]+AppImage"' | head -n 1 | sed -E 's/.*"([^"]+)"/\1/')
+          fi
+          if [ -n "$$latest_url" ]; then
+            printf "%s\n" "$$latest_url"
+          else
+            printf "%s\n" "$$fallback_url"
+          fi
+        }
+        QIDI_DOWNLOAD_URL="$$QIDI_URL"
+        if [ -z "$$QIDI_DOWNLOAD_URL" ]; then
+          QIDI_DOWNLOAD_URL=$$(resolve_latest_qidi_url)
+        fi
+        mkdir -p "$$HOME/.local/bin" "$$HOME/.local/share/qidi-studio"
+        QIDI_URL_FILE="$$HOME/.local/share/qidi-studio/last-download-url"
+        QIDI_RUNTIME_DIR="$$HOME/.local/share/qidi-studio/runtime"
+        if [ -f "$$QIDI_URL_FILE" ]; then
+          CACHED_QIDI_URL=$$(cat "$$QIDI_URL_FILE")
+        else
+          CACHED_QIDI_URL=""
+        fi
+        if [ ! -x "$$QIDI_RUNTIME_DIR/AppRun" ] || [ "$$CACHED_QIDI_URL" != "$$QIDI_DOWNLOAD_URL" ]; then
+          TMP_DIR=$$(mktemp -d)
+          APPIMAGE_PATH="$$TMP_DIR/QIDIStudio.AppImage"
+          curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$$QIDI_DOWNLOAD_URL" -o "$$APPIMAGE_PATH"
+          chmod +x "$$APPIMAGE_PATH"
+          cd "$$TMP_DIR"
+          "$$APPIMAGE_PATH" --appimage-extract >/dev/null
+          rm -rf "$$QIDI_RUNTIME_DIR"
+          mkdir -p "$$QIDI_RUNTIME_DIR"
+          cp -a squashfs-root/. "$$QIDI_RUNTIME_DIR/"
+          printf "#!/bin/sh\nexec %s/AppRun \"\$@\"\n" "$$QIDI_RUNTIME_DIR" > "$$HOME/.local/bin/QIDIStudio"
+          chmod +x "$$HOME/.local/bin/QIDIStudio"
+          printf "%s\n" "$$QIDI_DOWNLOAD_URL" > "$$QIDI_URL_FILE"
+          rm -rf "$$TMP_DIR"
+        fi
+        exec "$$HOME/.local/bin/QIDIStudio"
